@@ -209,3 +209,15 @@ opt-level = 3
 # FIXME: We need to catch up with Diplomat upstream again, but this is a significant amount of work.
 # In the meantime, we use this forked version which fixes an undefined behavior in the code expanded by the bridge macro.
 diplomat = { git = "https://github.com/CBenoit/diplomat", rev = "6dc806e80162b6b39509a04a2835744236cd2396" }
+# FIXME: picky 7.0.0-rc.23 on crates.io pins elliptic-curve =0.14.0-rc.31, which conflicts with downstream
+# crates needing =0.14.0-rc.32. This commit on the picky-rs main branch bumps the pin to rc.32.
+# Drop these patches once a picky release with rc.32 is published.
+picky = { git = "https://github.com/Devolutions/picky-rs", rev = "8a35c639565832ad745982120d39cdc385738641", version = "=7.0.0-rc.23" }
+picky-asn1 = { git = "https://github.com/Devolutions/picky-rs", rev = "8a35c639565832ad745982120d39cdc385738641", version = "=0.10.1" }
+picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs", rev = "8a35c639565832ad745982120d39cdc385738641", version = "=0.5.6" }
+picky-asn1-x509 = { git = "https://github.com/Devolutions/picky-rs", rev = "8a35c639565832ad745982120d39cdc385738641", version = "=0.15.4" }
+picky-krb = { git = "https://github.com/Devolutions/picky-rs", rev = "8a35c639565832ad745982120d39cdc385738641", version = "=0.12.3" }
+# FIXME: sspi 0.21 on crates.io pins rsa =0.10.0-rc.17 / pkcs8 =0.11.0-rc.11 / signature =3.0.0-rc.10,
+# which conflicts with the rc.18 / stable versions the picky patch above brings in. Point at the fork
+# branch that bumps those pins until a matching sspi release is published.
+sspi = { git = "https://github.com/nob13/sspi-rs", rev = "fc51729c710fcaec622e75794a608c1aad23821e" }
