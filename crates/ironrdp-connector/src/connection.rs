@@ -695,7 +695,12 @@ fn create_gcc_blocks<'a>(
                     let mut early_capability_flags = ClientEarlyCapabilityFlags::VALID_CONNECTION_TYPE
                         | ClientEarlyCapabilityFlags::SUPPORT_ERR_INFO_PDU
                         | ClientEarlyCapabilityFlags::STRONG_ASYMMETRIC_KEYS
-                        | ClientEarlyCapabilityFlags::SUPPORT_SKIP_CHANNELJOIN;
+                        | ClientEarlyCapabilityFlags::SUPPORT_SKIP_CHANNELJOIN
+                        // FreeRDP-server-based hosts (e.g. gnome-remote-desktop) reject clients
+                        // that do not advertise Graphics Pipeline DVC support during the GCC
+                        // Capabilities Exchange. Always advertise it; servers that do not open
+                        // the EGFX channel simply ignore the flag.
+                        | ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL;
 
                     // TODO(#136): support for ClientEarlyCapabilityFlags::SUPPORT_STATUS_INFO_PDU
 
