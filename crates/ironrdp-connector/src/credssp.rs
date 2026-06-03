@@ -101,7 +101,24 @@ impl CredsspSequence {
     ) -> ConnectorResult<(Self, credssp::TsRequest)> {
         let credentials: sspi::Credentials = match &credentials {
             Credentials::UsernamePassword { username, password } => {
-                let username = Username::new(username, domain).map_err(|e| custom_err!("invalid username", e))?;
+                // sspi's `Username::new` / `parse` splits on the first `\` or last `@` and only
+                // the account-name half ends up in the NTLM `UserName` field. That is correct for
+                // ordinary "DOMAIN\user" / "user@suffix" inputs, but corrupts opaque ticket-style
+                // usernames such as gnome-remote-desktop's server-redirection one-shot identifiers
+                // (random strings drawn from an alphabet that includes `@`).
+                //
+                // `new_upn(full_name, "")` packs the full literal username into `account_name`,
+                // whose accessor (the one that feeds NTLM) returns it verbatim. Only take this path
+                // when no domain was supplied and the username has an `@` but no `\`; otherwise the
+                // ordinary parsing path already preserves the value.
+                let username = if domain.is_none_or(str::is_empty)
+                    && !username.contains('\\')
+                    && username.contains('@')
+                {
+                    Username::new_upn(username, "").map_err(|e| custom_err!("invalid username", e))?
+                } else {
+                    Username::new(username, domain).map_err(|e| custom_err!("invalid username", e))?
+                };
 
                 sspi::AuthIdentity {
                     username,
