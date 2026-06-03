@@ -120,17 +120,19 @@ impl Sequence for ConnectionActivationSequence {
 
                 // Some servers (e.g. GNOME Remote Desktop) send a ServerDeactivateAll PDU
                 // before ServerDemandActive as part of a Deactivation-Reactivation Sequence
-                // (MS-RDPBCGR §1.3.1.3). Skip it and stay in the same state to wait for
-                // the actual DemandActive PDU.
+                // (MS-RDPBCGR §1.3.1.3). On a redirected reconnect GRD's user-session daemon
+                // also emits a Share Data PDU (e.g. SaveSessionInfo) before its Demand Active.
+                // Skip either and stay in the same state to wait for the actual DemandActive PDU.
                 //
-                // The decoded PDU is intentionally discarded: the DeactivateAll body carries
-                // no payload we need during initial activation.
+                // The decoded PDU is intentionally discarded: neither body carries a payload we
+                // need during initial activation.
                 if matches!(
                     share_control_ctx.pdu,
-                    rdp::headers::ShareControlPdu::ServerDeactivateAll(_)
+                    rdp::headers::ShareControlPdu::ServerDeactivateAll(_) | rdp::headers::ShareControlPdu::Data(_)
                 ) {
                     debug!(
-                        "Skipping Server Deactivate All PDU received during Capabilities Exchange, awaiting Server Demand Active"
+                        "Skipping leading {} PDU received during Capabilities Exchange, awaiting Server Demand Active",
+                        share_control_ctx.pdu.as_short_name()
                     );
                     self.state = ConnectionActivationState::CapabilitiesExchange {
                         io_channel_id,

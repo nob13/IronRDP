@@ -558,6 +558,14 @@ impl Sequence for ClientConnector {
                         written,
                         ClientConnectorState::ConnectionFinalization { connection_activation },
                     ),
+                    // The inner sequence may consume a leading ServerDeactivateAll or Share Data
+                    // PDU (sent by some hosts, e.g. gnome-remote-desktop, before the Server Demand
+                    // Active) and remain in CapabilitiesExchange. Stay here too and consume the
+                    // next PDU, which carries the actual Demand Active.
+                    ConnectionActivationState::CapabilitiesExchange { .. } => (
+                        written,
+                        ClientConnectorState::CapabilitiesExchange { connection_activation },
+                    ),
                     _ => return Err(general_err!("invalid state (this is a bug)")),
                 }
             }
