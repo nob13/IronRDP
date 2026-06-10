@@ -13,6 +13,7 @@ use ironrdp_pdu::rdp::autodetect::AutoDetectRequest;
 use ironrdp_pdu::rdp::client_info::CompressionType as PduCompressionType;
 use ironrdp_pdu::rdp::headers::ShareDataPdu;
 use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
+use ironrdp_pdu::rdp::server_redirection::ServerRedirectionPacket;
 use ironrdp_pdu::slow_path::{self, GraphicsUpdateType};
 use ironrdp_pdu::{Action, mcs};
 use ironrdp_svc::{SvcMessage, SvcProcessor, SvcProcessorMessages};
@@ -328,6 +329,10 @@ pub enum ActiveStageOutput {
     ///
     /// [\[MS-RDPBCGR\] 2.2.15.1]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/de783158-8b01-4818-8fb0-62523a5b3490
     MultitransportRequest(MultitransportRequestPdu),
+    /// Server Redirection PDU ([MS-RDPBCGR] 2.2.13.1). The application should tear
+    /// down the current connection and reconnect using the routing token,
+    /// redirected credentials, and optional target address in the packet.
+    ServerRedirection(Box<ServerRedirectionPacket>),
     /// Server-reported network characteristics ([\[MS-RDPBCGR\] 2.2.14.1.5]).
     ///
     /// Contains an [`AutoDetectRequest::NetworkCharacteristicsResult`] with
@@ -359,6 +364,7 @@ impl TryFrom<x224::ProcessorOutput> for ActiveStageOutput {
             }
             x224::ProcessorOutput::DeactivateAll(cas) => Ok(Self::DeactivateAll(cas)),
             x224::ProcessorOutput::MultitransportRequest(pdu) => Ok(Self::MultitransportRequest(pdu)),
+            x224::ProcessorOutput::ServerRedirection(packet) => Ok(Self::ServerRedirection(packet)),
             x224::ProcessorOutput::AutoDetect(request) => Ok(Self::AutoDetect(request)),
             // GraphicsUpdate and PointerUpdate are consumed in ActiveStage::process()
             // before reaching this conversion.

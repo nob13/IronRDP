@@ -172,6 +172,11 @@ pub enum IoChannelPdu {
     ///
     /// Received when the server wants the client to establish a sideband UDP transport.
     MultitransportRequest(MultitransportRequestPdu),
+    /// Server Redirection PDU ([MS-RDPBCGR] 2.2.13.1).
+    ///
+    /// The server instructs the client to disconnect and reconnect to the
+    /// (possibly same) target with a routing token and redirected credentials.
+    ServerRedirection(rdp::server_redirection::ServerRedirectionPacket),
 }
 
 pub fn decode_io_channel(ctx: SendDataIndicationCtx<'_>) -> ConnectorResult<IoChannelPdu> {
@@ -212,6 +217,7 @@ pub fn decode_io_channel(ctx: SendDataIndicationCtx<'_>) -> ConnectorResult<IoCh
 
             Ok(IoChannelPdu::Data(share_data_ctx))
         }
+        rdp::headers::ShareControlPdu::ServerRedirect(packet) => Ok(IoChannelPdu::ServerRedirection(packet)),
         other => Err(reason_err!(
             "decode_io_channel",
             "received unexpected Share Control PDU: got {} (expected Data PDU or Server Deactivate All PDU)",

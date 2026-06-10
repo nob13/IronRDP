@@ -121,7 +121,6 @@ impl<'de> Decode<'de> for ShareControlHeader {
         let total_length = usize::from(src.read_u16());
         let pdu_type_with_version = src.read_u16();
         let pdu_source = src.read_u16();
-        let share_id = src.read_u32();
 
         let pdu_type = ShareControlPduType::from_u16(pdu_type_with_version & SHARE_CONTROL_HEADER_MASK)
             .ok_or_else(|| invalid_field_err!("pdu_type", "invalid pdu type"))?;
@@ -129,6 +128,17 @@ impl<'de> Decode<'de> for ShareControlHeader {
         if pdu_version != PROTOCOL_VERSION {
             return Err(invalid_field_err!("pdu_version", "invalid PDU version"));
         }
+
+        // The Server Redirection PDU (PDUTYPE_SERVER_REDIR_PKT, [MS-RDPBCGR] 2.2.13.1)
+        // does not carry the trailing 4-byte share_id field that other Share Control
+        // PDUs do. Skip reading it for that type and let the inner decoder claim
+        // those bytes as part of the redirection packet body.
+        let share_id = if pdu_type == ShareControlPduType::ServerRedirect {
+            0
+        } else {
+            ensure_size!(in: src, size: 4);
+            src.read_u32()
+        };
 
         let share_pdu = ShareControlPdu::from_type(src, pdu_type)?;
         let header = Self {
@@ -165,6 +175,13 @@ pub enum ShareControlPdu {
     ClientConfirmActive(ClientConfirmActive),
     Data(ShareDataHeader),
     ServerDeactivateAll(ServerDeactivateAll),
+    /// Enhanced Security Server Redirection PDU ([MS-RDPBCGR] 2.2.13.1).
+    ///
+    /// Sent by the server to instruct the client to disconnect and reconnect to the
+    /// (possibly same) target. gnome-remote-desktop's --system daemon uses this to
+    /// hand off authenticated sessions to the per-user daemon. Decoded only; never
+    /// originated by this client.
+    ServerRedirect(crate::rdp::server_redirection::ServerRedirectionPacket),
 }
 
 impl ShareControlPdu {
@@ -176,6 +193,7 @@ impl ShareControlPdu {
             ShareControlPdu::ClientConfirmActive(_) => "Client Confirm Active PDU",
             ShareControlPdu::Data(_) => "Data PDU",
             ShareControlPdu::ServerDeactivateAll(_) => "Server Deactivate All PDU",
+            ShareControlPdu::ServerRedirect(_) => "Server Redirection PDU",
         }
     }
 
@@ -185,6 +203,7 @@ impl ShareControlPdu {
             ShareControlPdu::ClientConfirmActive(_) => ShareControlPduType::ConfirmActivePdu,
             ShareControlPdu::Data(_) => ShareControlPduType::DataPdu,
             ShareControlPdu::ServerDeactivateAll(_) => ShareControlPduType::DeactivateAllPdu,
+            ShareControlPdu::ServerRedirect(_) => ShareControlPduType::ServerRedirect,
         }
     }
 
@@ -200,7 +219,9 @@ impl ShareControlPdu {
             ShareControlPduType::DeactivateAllPdu => {
                 Ok(ShareControlPdu::ServerDeactivateAll(ServerDeactivateAll::decode(src)?))
             }
-            _ => Err(invalid_field_err!("share_type", "unexpected share control PDU type")),
+            ShareControlPduType::ServerRedirect => Ok(ShareControlPdu::ServerRedirect(
+                crate::rdp::server_redirection::ServerRedirectionPacket::decode(src)?,
+            )),
         }
     }
 }
@@ -212,6 +233,10 @@ impl Encode for ShareControlPdu {
             ShareControlPdu::ClientConfirmActive(pdu) => pdu.encode(dst),
             ShareControlPdu::Data(share_data_header) => share_data_header.encode(dst),
             ShareControlPdu::ServerDeactivateAll(deactivate_all) => deactivate_all.encode(dst),
+            ShareControlPdu::ServerRedirect(_) => Err(other_err!(
+                "ShareControlPdu::ServerRedirect",
+                "encoding Server Redirection PDU is not supported (server-only)",
+            )),
         }
     }
 
@@ -225,6 +250,8 @@ impl Encode for ShareControlPdu {
             ShareControlPdu::ClientConfirmActive(pdu) => pdu.size(),
             ShareControlPdu::Data(share_data_header) => share_data_header.size(),
             ShareControlPdu::ServerDeactivateAll(deactivate_all) => deactivate_all.size(),
+            // Conservative; ServerRedirect is decoded only, never encoded.
+            ShareControlPdu::ServerRedirect(_) => 0,
         }
     }
 }

@@ -7,6 +7,7 @@ use ironrdp_pdu::rdp::autodetect::{AutoDetectRequest, AutoDetectResponse};
 use ironrdp_pdu::rdp::headers::ShareDataPdu;
 use ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu;
 use ironrdp_pdu::rdp::server_error_info::{ErrorInfo, ProtocolIndependentCode, ServerSetErrorInfoPdu};
+use ironrdp_pdu::rdp::server_redirection::ServerRedirectionPacket;
 use ironrdp_pdu::x224::X224;
 use ironrdp_svc::{StaticChannelSet, SvcMessage, SvcProcessor, SvcProcessorMessages, client_encode_svc_messages};
 use tracing::debug;
@@ -41,6 +42,10 @@ pub enum ProcessorOutput {
     ///
     /// [\[MS-RDPBCGR\] 2.2.14]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/dc672839-4f4e-40b1-a71c-cd6a959baa38
     AutoDetect(AutoDetectRequest),
+    /// Server Redirection PDU ([MS-RDPBCGR] 2.2.13.1). Client should disconnect
+    /// and reconnect to the (possibly same) target using the routing token,
+    /// redirected credentials, and optional target address in the packet.
+    ServerRedirection(Box<ServerRedirectionPacket>),
     /// Slow-path graphics update ([MS-RDPBCGR] 2.2.9.1.1.3).
     /// Raw update payload starting with `updateType(u16)`.
     GraphicsUpdate(Vec<u8>),
@@ -246,6 +251,10 @@ impl Processor {
             ironrdp_connector::legacy::IoChannelPdu::DeactivateAll(_) => Ok(vec![ProcessorOutput::DeactivateAll(
                 Box::new(self.connection_activation.reset_clone()),
             )]),
+            ironrdp_connector::legacy::IoChannelPdu::ServerRedirection(packet) => {
+                debug!(session_id = packet.session_id, "Received Server Redirection PDU");
+                Ok(vec![ProcessorOutput::ServerRedirection(Box::new(packet))])
+            }
         }
     }
 
