@@ -464,12 +464,15 @@ fn dequantize_component_ccq(coefficients: &mut [i16], quant: &ComponentCodecQuan
 
     for (band_idx, band) in bands.iter().enumerate() {
         let q = quant.for_band(band_idx);
-        let factor = i16::from(q).saturating_sub(1);
+        let factor = u32::from(q).saturating_sub(1);
         if factor > 0 {
             let start = band.offset;
             let end = start + band.count();
             for coeff in &mut coefficients[start..end] {
-                *coeff <<= factor;
+                // i32 intermediate + clamp: a raw `i16 <<= factor` wraps for
+                // large low-frequency coefficients (e.g. LL3 <<5, HL1 <<7),
+                // corrupting the tile. Mirrors the encoder's clamped >>.
+                *coeff = clamp_i16(i32::from(*coeff) << factor);
             }
         }
     }
@@ -1749,6 +1752,32 @@ mod tests {
         assert_eq!(coefficients[0], 80);
         // LL3: shift left by (3 - 1) = 2 -> 5 << 2 = 20
         assert_eq!(coefficients[4032], 20);
+    }
+
+    #[test]
+    fn dequantize_component_ccq_clamps_instead_of_wrapping() {
+        // A large coefficient shifted left would exceed i16 range. Clamping
+        // to i16::MAX (rather than a raw `i16 <<=` that wraps to garbage) is
+        // what keeps detail/text tiles from being corrupted (regression:
+        // gnome-remote-desktop login screen showed only a handful of colors).
+        let mut coefficients = vec![0i16; 4096];
+        coefficients[0] = 1000; // HL1 band (index 0)
+        let quant = ComponentCodecQuant {
+            ll3: 0,
+            hl3: 0,
+            lh3: 0,
+            hh3: 0,
+            hl2: 0,
+            lh2: 0,
+            hh2: 0,
+            hl1: 9, // factor 8 -> 1000 << 8 = 256000, overflows i16
+            lh1: 0,
+            hh1: 0,
+        };
+
+        dequantize_component_ccq(&mut coefficients, &quant, false);
+
+        assert_eq!(coefficients[0], i16::MAX);
     }
 
     // --- B10: Server encode pipeline tests ---
