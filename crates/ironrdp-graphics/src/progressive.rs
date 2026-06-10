@@ -1077,15 +1077,22 @@ impl ProgressiveDecoder {
         let blocks = decode_progressive_stream(bitmap_data)?;
 
         // Extract context flags from the CONTEXT block. Per MS-RDPEGFX 2.2.4.2
-        // a Progressive stream MUST begin with SYNC + CONTEXT; treat absence as
-        // a malformed stream rather than silently defaulting band layout.
-        let use_reduce_extrapolate = blocks
-            .iter()
-            .find_map(|block| match block {
-                ProgressiveBlock::Context(ctx) => Some(ctx.uses_reduce_extrapolate()),
-                _ => None,
-            })
-            .ok_or(ProgressiveDecodeError::MissingBlock("CONTEXT"))?;
+        // a Progressive stream begins with SYNC + CONTEXT only for the FIRST
+        // frame of a codec_context_id; subsequent frames omit the CONTEXT block
+        // and reuse the established band layout (this is how
+        // gnome-remote-desktop streams). Use the block when present, otherwise
+        // fall back to the stored flag, and only error if no context exists yet.
+        let use_reduce_extrapolate = match blocks.iter().find_map(|block| match block {
+            ProgressiveBlock::Context(ctx) => Some(ctx.uses_reduce_extrapolate()),
+            _ => None,
+        }) {
+            Some(flag) => flag,
+            None => self
+                .contexts
+                .get(&codec_context_id)
+                .map(|ctx| ctx.surface.use_reduce_extrapolate)
+                .ok_or(ProgressiveDecodeError::MissingBlock("CONTEXT"))?,
+        };
 
         // Get or create the context for this codec_context_id
         let context = match self.contexts.entry(codec_context_id) {
@@ -1635,6 +1642,73 @@ mod tests {
 
         decoder.reset();
         assert!(decoder.contexts.is_empty());
+    }
+
+    #[test]
+    fn context_block_only_required_for_the_first_frame() {
+        // gnome-remote-desktop sends the CONTEXT block only in the first
+        // frame of a codec context; later frames omit it and reuse the
+        // established band layout. The decoder must tolerate that.
+        use ironrdp_pdu::codecs::rfx::RfxRectangle;
+        use ironrdp_pdu::codecs::rfx::progressive::{
+            ProgressiveBlock, ProgressiveContextPdu, ProgressiveFrameBeginPdu, ProgressiveFrameEndPdu,
+            ProgressiveRegion, ProgressiveSyncPdu, encode_progressive_stream,
+        };
+
+        let region = || ProgressiveRegion {
+            tile_size: 0x40,
+            rects: vec![RfxRectangle {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+            }],
+            quant_vals: vec![],
+            quant_prog_vals: vec![],
+            flags: 0,
+            tiles: vec![],
+        };
+
+        let with_context = encode_progressive_stream(&[
+            ProgressiveBlock::Sync(ProgressiveSyncPdu),
+            ProgressiveBlock::Context(ProgressiveContextPdu {
+                context_id: 0,
+                tile_size: 0x0040,
+                flags: 0,
+            }),
+            ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
+                frame_index: 0,
+                region_count: 1,
+            }),
+            ProgressiveBlock::Region(region()),
+            ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu),
+        ])
+        .unwrap();
+
+        let without_context = encode_progressive_stream(&[
+            ProgressiveBlock::Sync(ProgressiveSyncPdu),
+            ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
+                frame_index: 1,
+                region_count: 1,
+            }),
+            ProgressiveBlock::Region(region()),
+            ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu),
+        ])
+        .unwrap();
+
+        // No established context yet: a context-less frame is still rejected.
+        let mut fresh = ProgressiveDecoder::new();
+        assert!(matches!(
+            fresh.decode_bitmap(7, 640, 480, &without_context),
+            Err(ProgressiveDecodeError::MissingBlock("CONTEXT"))
+        ));
+
+        // Once the first frame establishes the context, a context-less
+        // follow-up frame decodes successfully (regression: previously this
+        // returned MissingBlock("CONTEXT") and froze the display).
+        let mut decoder = ProgressiveDecoder::new();
+        assert!(decoder.decode_bitmap(7, 640, 480, &with_context).is_ok());
+        assert!(decoder.decode_bitmap(7, 640, 480, &without_context).is_ok());
     }
 
     #[test]
